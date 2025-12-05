@@ -3,7 +3,7 @@ name: Scrape Pauper League Results
 on:
   # Run daily at 6 AM UTC
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '*/30 * * * *'
   
   # Allow manual trigger
   workflow_dispatch:
