@@ -26,12 +26,18 @@ SUPABASE_HEADERS = {
 # Selenium setup
 # ==========================
 options = webdriver.ChromeOptions()
-options.add_argument("--headless")  # Run without opening a browser
+options.add_argument("--headless=new")  # newer headless mode
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
 
+# If running in CI (GitHub), we’ll pass CHROME_BINARY in env
+chrome_binary = os.environ.get("CHROME_BINARY")
+if chrome_binary:
+    options.binary_location = chrome_binary
+
 service = Service(ChromeDriverManager().install())
 driver = webdriver.Chrome(service=service, options=options)
+
 
 # ==========================
 # Helper: extract numeric deck ID from URL
