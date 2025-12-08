@@ -1,5 +1,4 @@
 name: Scrape Pauper League Results
-
 on:
   # Run daily at 6 AM UTC
   schedule:
@@ -47,3 +46,12 @@ jobs:
           path: |
             *.log
           retention-days: 7
+      
+      - name: Trigger pauper-decklist-cron
+        if: success()
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+            https://api.github.com/repos/saitama1089-blip/pauper-decklist-cron/dispatches \
+            -d '{"event_type":"league-cron-complete"}'
