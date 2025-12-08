@@ -45,6 +45,9 @@ def setup_driver():
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
     
+    # ADDED: Use 'eager' page load strategy - don't wait for all resources
+    options.page_load_strategy = 'eager'
+    
     # Disable unnecessary features
     options.add_experimental_option("excludeSwitches", ["enable-logging"])
     options.add_experimental_option('prefs', {
@@ -56,7 +59,11 @@ def setup_driver():
     try:
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
-        driver.set_page_load_timeout(30)
+        
+        # INCREASED: Timeout settings - both page load and script execution
+        driver.set_page_load_timeout(45)  # Increased from 30 to 45 seconds
+        driver.set_script_timeout(45)
+        
         return driver
     except Exception as e:
         print(f"ERROR: Failed to setup Chrome driver: {e}")
@@ -109,8 +116,26 @@ def main():
             print(f"{'='*60}")
             
             try:
-                driver.get(url)
-                time.sleep(2)  # Brief pause to ensure page loads
+                # IMPROVED: More robust page loading with retry logic
+                max_retries = 2
+                retry_count = 0
+                page_loaded = False
+                
+                while retry_count < max_retries and not page_loaded:
+                    try:
+                        driver.get(url)
+                        time.sleep(2)  # Brief pause to ensure page loads
+                        page_loaded = True
+                    except TimeoutException:
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            print(f"⚠ Timeout on attempt {retry_count}, retrying...")
+                            # Stop any pending page load
+                            driver.execute_script("window.stop();")
+                            time.sleep(1)
+                        else:
+                            print(f"✗ Page failed to load after {max_retries} attempts for {date_str}")
+                            raise
                 
                 html = driver.page_source
                 soup = BeautifulSoup(html, "html.parser")
@@ -189,7 +214,7 @@ def main():
                     print(f"Table not found for {date_str} (tournament may not exist)")
                     
             except TimeoutException:
-                print(f"✗ Timeout loading page for {date_str}")
+                print(f"✗ Timeout loading page for {date_str} - skipping")
             except WebDriverException as e:
                 print(f"✗ WebDriver error for {date_str}: {e}")
             except Exception as e:
