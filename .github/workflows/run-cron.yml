@@ -1,11 +1,16 @@
 name: Scrape Pauper League Results
+
 on:
-  # Run daily at 6 AM UTC
+  # Run every 30 minutes
   schedule:
     - cron: '*/30 * * * *'
   
   # Allow manual trigger
   workflow_dispatch:
+
+env:
+  # Set to "true" when you want to re-enable the final trigger step
+  ENABLE_TRIGGER: "false"
 
 jobs:
   scrape:
@@ -48,7 +53,7 @@ jobs:
           retention-days: 7
       
       - name: Trigger pauper-decklist-cron
-        if: success()
+        if: success() && env.ENABLE_TRIGGER == 'true'
         run: |
           curl -X POST \
             -H "Accept: application/vnd.github.v3+json" \
