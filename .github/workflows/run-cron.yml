@@ -10,7 +10,7 @@ on:
 
 env:
   # Set to "true" when you want to re-enable the final trigger step
-  ENABLE_TRIGGER: "false"
+  ENABLE_TRIGGER: "true"
 
 jobs:
   scrape:
