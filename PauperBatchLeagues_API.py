@@ -15,10 +15,10 @@ import json
 # Supabase configuration
 # ==========================
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY")
+SUPABASE_SERVICE_ROLE = os.environ.get("SUPABASE_SERVICE_ROLE")
 
-if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    raise ValueError("Missing required environment variables: SUPABASE_URL and/or SUPABASE_ANON_KEY")
+if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE:
+    raise ValueError("Missing required environment variables: SUPABASE_URL and/or SUPABASE_SERVICE_ROLE")
 
 # League insert view endpoint
 SUPABASE_LEAGUE_INSERT_ENDPOINT = f"{SUPABASE_URL}/rest/v1/pauper_league_results_insert"
@@ -27,8 +27,8 @@ SUPABASE_LEAGUE_INSERT_ENDPOINT = f"{SUPABASE_URL}/rest/v1/pauper_league_results
 SUPABASE_CHALLENGE_INSERT_ENDPOINT = f"{SUPABASE_URL}/rest/v1/challenge_deck_results_insert"
 
 SUPABASE_HEADERS = {
-    "apikey": SUPABASE_ANON_KEY,
-    "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+    "apikey": SUPABASE_SERVICE_ROLE,
+    "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE}",
     "Content-Type": "application/json",
     "Prefer": "return=minimal"
 }
@@ -165,7 +165,6 @@ def scrape_challenge_for_date(driver, date_str: str):
 
             pilot_name = cols[2].get_text(strip=True)
 
-            # Match your earlier challenge insert shape (deck_id + date)
             records.append({
                 "deck_id": deck_id,
                 "date": date_str,
@@ -193,7 +192,7 @@ def main():
         print("Chrome driver initialized successfully")
 
         # --------------------------
-        # PART 1: Pauper Leagues (your existing logic)
+        # PART 1: Pauper Leagues
         # --------------------------
         today = datetime.today()
         start_date = today - timedelta(days=6)  # last 7 days including today
@@ -298,7 +297,7 @@ def main():
         print(f"{'='*60}")
 
         # --------------------------
-        # PART 2: Pauper Challenges (last 15 days rolling)
+        # PART 2: Pauper Challenges
         # --------------------------
         challenge_end = datetime.today().date()
         challenge_start = challenge_end - timedelta(days=CHALLENGE_LOOKBACK_DAYS - 1)
