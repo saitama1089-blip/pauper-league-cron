@@ -1,48 +1,44 @@
 name: Scrape Pauper League Results
 
 on:
-  # Run every 30 minutes
   schedule:
     - cron: '*/30 * * * *'
-  
-  # Allow manual trigger
   workflow_dispatch:
 
 env:
-  # Set to "true" when you want to re-enable the final trigger step
   ENABLE_TRIGGER: "true"
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-      
+
       - name: Install Chrome
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
-      
+
       - name: Install dependencies
         run: |
           pip install --upgrade pip
           pip install selenium webdriver-manager beautifulsoup4 requests
-      
+
       - name: Run scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
         run: |
           python PauperBatchLeagues_API.py
-      
+
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -51,7 +47,7 @@ jobs:
           path: |
             *.log
           retention-days: 7
-      
+
       - name: Trigger pauper-decklist-cron
         if: success() && env.ENABLE_TRIGGER == 'true'
         run: |
