@@ -1,4 +1,5 @@
 import os
+import random
 import time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -45,6 +46,22 @@ TOURNAMENT_URL_TEMPLATES = [
 # Rolling window for challenges (defaults to 15 days)
 CHALLENGE_LOOKBACK_DAYS = int(os.environ.get("CHALLENGE_LOOKBACK_DAYS", "15"))
 
+TOURNAMENT_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/123.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+MTGGOLDFISH_TIMEOUT = int(os.environ.get("MTGGOLDFISH_TIMEOUT", "25"))
+MTGGOLDFISH_MAX_RETRIES = int(os.environ.get("MTGGOLDFISH_MAX_RETRIES", "4"))
+
+SESSION = requests.Session()
+SESSION.headers.update(TOURNAMENT_REQUEST_HEADERS)
+
 # ==========================
 # Selenium setup (GitHub Actions friendly)
 # ==========================
@@ -89,6 +106,23 @@ def get_deck_id(deck_url: str):
         return None
 
 # ==========================
+# Helper: detect challenge/interstitial pages
+# ==========================
+def looks_like_challenge_page(html: str) -> bool:
+    body = (html or "").lower()
+    if "<html" not in body:
+        return False
+
+    markers = (
+        "just a moment",
+        "performing security verification",
+        "attention required",
+        "please enable cookies",
+        "captcha",
+    )
+    return any(marker in body for marker in markers)
+
+# ==========================
 # Helper: robust driver.get with retries
 # ==========================
 def load_page_with_retries(driver, url: str, max_retries: int = 2, sleep_after: float = 2.0):
@@ -112,6 +146,44 @@ def load_page_with_retries(driver, url: str, max_retries: int = 2, sleep_after: 
                 return False
     return False
 
+
+def fetch_page_html_with_requests(url: str) -> str:
+    for attempt in range(1, MTGGOLDFISH_MAX_RETRIES + 1):
+        try:
+            response = SESSION.get(url, timeout=MTGGOLDFISH_TIMEOUT)
+            html = response.text or ""
+
+            if response.status_code == 200 and not looks_like_challenge_page(html):
+                return html
+
+            wait = min(30.0, (2 ** (attempt - 1)) + random.uniform(1.0, 3.0))
+            print(
+                f"⚠ Tournament fetch looked blocked ({response.status_code}). "
+                f"Backing off {wait:.1f}s (attempt {attempt}/{MTGGOLDFISH_MAX_RETRIES})"
+            )
+            time.sleep(wait)
+        except requests.RequestException as e:
+            wait = min(30.0, (2 ** (attempt - 1)) + random.uniform(1.0, 3.0))
+            print(
+                f"⚠ Request error fetching tournament page: {e}. "
+                f"Backing off {wait:.1f}s (attempt {attempt}/{MTGGOLDFISH_MAX_RETRIES})"
+            )
+            time.sleep(wait)
+
+    return ""
+
+
+def fetch_page_html(driver, url: str, max_retries: int = 2, sleep_after: float = 2.0) -> str:
+    html = fetch_page_html_with_requests(url)
+    if html:
+        return html
+
+    ok = load_page_with_retries(driver, url, max_retries=max_retries, sleep_after=sleep_after)
+    if not ok:
+        return ""
+
+    return driver.page_source or ""
+
 # ==========================
 # Challenge scraping helper
 # ==========================
@@ -124,22 +196,18 @@ def scrape_challenge_for_date(driver, date_str: str):
         url = template.format(date=date_str)
         print(f"Trying Challenge URL: {url}")
 
-        ok = load_page_with_retries(driver, url, max_retries=2, sleep_after=2.0)
-        if not ok:
+        html = fetch_page_html(driver, url, max_retries=2, sleep_after=2.0)
+        if not html:
             continue
 
-        soup = BeautifulSoup(driver.page_source, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
         table = soup.find("table", class_="table-tournament")
         if not table:
             print(f"  -> No tournament table found at {url}")
             continue
 
-        tbody = table.find("tbody")
-        if not tbody:
-            print(f"  -> No <tbody> found at {url}")
-            continue
-
-        rows = tbody.find_all("tr")
+        row_container = table.find("tbody") or table
+        rows = row_container.find_all("tr", recursive=False)
         if not rows:
             print(f"  -> Tournament table empty at {url}")
             continue
@@ -210,12 +278,12 @@ def main():
             print(f"{'='*60}")
 
             try:
-                ok = load_page_with_retries(driver, url, max_retries=2, sleep_after=2.0)
-                if not ok:
+                html = fetch_page_html(driver, url, max_retries=2, sleep_after=2.0)
+                if not html:
                     current_date += timedelta(days=1)
                     continue
 
-                soup = BeautifulSoup(driver.page_source, "html.parser")
+                soup = BeautifulSoup(html, "html.parser")
                 table = soup.find("table", class_="table-tournament")
 
                 if not table:
@@ -224,14 +292,8 @@ def main():
                     time.sleep(1)
                     continue
 
-                tbody = table.find("tbody")
-                if not tbody:
-                    print(f"Tbody not found for {date_str} (tournament may not exist)")
-                    current_date += timedelta(days=1)
-                    time.sleep(1)
-                    continue
-
-                rows = tbody.find_all("tr")
+                row_container = table.find("tbody") or table
+                rows = row_container.find_all("tr", recursive=False)
                 print(f"Found {len(rows)} rows in league table")
 
                 payload = []
