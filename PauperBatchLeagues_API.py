@@ -12,6 +12,10 @@ from urllib.parse import urlparse
 import requests
 import json
 
+
+class TournamentNotFound(Exception):
+    """A missing event is normal and does not need retries or Chrome."""
+
 # ==========================
 # Supabase configuration
 # ==========================
@@ -153,6 +157,9 @@ def fetch_page_html_with_requests(url: str) -> str:
             response = SESSION.get(url, timeout=MTGGOLDFISH_TIMEOUT)
             html = response.text or ""
 
+            if response.status_code in (404, 410):
+                raise TournamentNotFound(url)
+
             if response.status_code == 200 and not looks_like_challenge_page(html):
                 return html
 
@@ -174,7 +181,10 @@ def fetch_page_html_with_requests(url: str) -> str:
 
 
 def fetch_page_html(driver, url: str, max_retries: int = 2, sleep_after: float = 2.0) -> str:
-    html = fetch_page_html_with_requests(url)
+    try:
+        html = fetch_page_html_with_requests(url)
+    except TournamentNotFound:
+        return ""
     if html:
         return html
 
@@ -182,7 +192,8 @@ def fetch_page_html(driver, url: str, max_retries: int = 2, sleep_after: float =
     if not ok:
         return ""
 
-    return driver.page_source or ""
+    html = driver.page_source or ""
+    return "" if looks_like_challenge_page(html) else html
 
 # ==========================
 # Challenge scraping helper
@@ -254,6 +265,7 @@ def scrape_challenge_for_date(driver, date_str: str):
 # ==========================
 def main():
     driver = None
+    processing_errors = 0
 
     try:
         driver = setup_driver()
@@ -338,6 +350,7 @@ def main():
                         print(f"✓ League insert OK for {date_str} ({len(payload)} rows)")
                         total_league_rows_inserted += len(payload)
                     else:
+                        processing_errors += 1
                         print(f"✗ League insert FAILED for {date_str}.")
                         print(f"  Status: {resp.status_code}")
                         print(f"  Body: {resp.text[:500]}")
@@ -345,10 +358,13 @@ def main():
                     print(f"No valid league rows to insert for {date_str}")
 
             except TimeoutException:
+                processing_errors += 1
                 print(f"✗ Timeout loading league page for {date_str} - skipping")
             except WebDriverException as e:
+                processing_errors += 1
                 print(f"✗ WebDriver error for league {date_str}: {e}")
             except Exception as e:
+                processing_errors += 1
                 print(f"✗ Unexpected error scraping league {date_str}: {e}")
 
             time.sleep(1)
@@ -397,12 +413,15 @@ def main():
                     print(f"✓ Challenge insert OK for {date_str} ({len(records)} rows)")
                     total_challenge_rows_inserted += len(records)
                 else:
+                    processing_errors += 1
                     print(f"✗ Challenge insert FAILED for {date_str}.")
                     print(f"  Status: {resp.status_code}")
                     print(f"  Body: {resp.text[:500]}")
             except requests.exceptions.RequestException as e:
+                processing_errors += 1
                 print(f"✗ Network error inserting challenge data for {date_str}: {e}")
             except Exception as e:
+                processing_errors += 1
                 print(f"✗ Unexpected error inserting challenge data for {date_str}: {e}")
 
             time.sleep(1)
@@ -413,6 +432,15 @@ def main():
         print(f"{'='*60}")
 
         print(f"\nALL DONE ✅ | League rows: {total_league_rows_inserted} | Challenge rows: {total_challenge_rows_inserted}")
+        if os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                summary.write(
+                    f"## Scraper results\n\nLeague rows submitted: {total_league_rows_inserted}\n\n"
+                    f"Challenge rows submitted: {total_challenge_rows_inserted}\n\n"
+                    f"Processing errors: {processing_errors}\n"
+                )
+        if processing_errors or total_league_rows_inserted + total_challenge_rows_inserted == 0:
+            raise RuntimeError("Scrape was incomplete or submitted no results")
 
     except Exception as e:
         print(f"FATAL ERROR: {e}")
