@@ -7,6 +7,7 @@ on:
 
 env:
   ENABLE_TRIGGER: "true"
+  CHALLENGE_LOOKBACK_DAYS: "16"
 
 concurrency:
   group: league-scrape-${{ github.repository }}
