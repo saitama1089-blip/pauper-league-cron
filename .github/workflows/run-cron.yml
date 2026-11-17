@@ -2,15 +2,20 @@ name: Scrape Pauper League Results
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '7,37 * * * *'
   workflow_dispatch:
 
 env:
   ENABLE_TRIGGER: "true"
 
+concurrency:
+  group: league-scrape-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -49,10 +54,25 @@ jobs:
           retention-days: 7
 
       - name: Trigger pauper-decklist-cron
-        if: success() && env.ENABLE_TRIGGER == 'true'
+        if: ${{ !cancelled() && env.ENABLE_TRIGGER == 'true' }}
+        env:
+          DISPATCH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          SOURCE_CONCLUSION: ${{ job.status }}
         run: |
-          curl -X POST \
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          with open('deck-sync-dispatch.json', 'w') as target:
+              json.dump({'event_type': 'league-cron-complete', 'client_payload': {
+                  'source_run_id': os.environ['SOURCE_RUN_ID'],
+                  'source_conclusion': os.environ['SOURCE_CONCLUSION'],
+                  'source_completed_at': datetime.now(timezone.utc).isoformat(),
+              }}, target)
+          PY
+          curl --fail-with-body --retry 3 --retry-delay 5 --connect-timeout 10 --max-time 30 -X POST \
             -H "Accept: application/vnd.github.v3+json" \
-            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+            -H "Authorization: Bearer ${DISPATCH_TOKEN}" \
             https://api.github.com/repos/saitama1089-blip/pauper-decklist-cron/dispatches \
-            -d '{"event_type":"league-cron-complete"}'
+            --data @deck-sync-dispatch.json \
+            --write-out 'Dispatch HTTP %{http_code}\n'
